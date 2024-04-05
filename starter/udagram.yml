@@ -1,18 +1,285 @@
 Description: CD12352 - Infrastructure as Code Project - Udagram
 
 Parameters:
-  # Add your parameters here
+  EnvironmentName:
+    Type: String
+    Description: The environment name
+  AsgDesiredCapacity:
+    Type: String
+    Description: Desired capacity for the fleet of instances
+    Default: 2
 
 Resources:
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound HTTP access from anywhere on port 80
+      VpcId: 
+        Fn::ImportValue: !Sub "${EnvironmentName}-vpc-id"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-load-balancer-security-group"
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound HTTP access from the load balancer on port 80
+      VpcId: 
+        Fn::ImportValue: !Sub "${EnvironmentName}-vpc-id"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionServerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-web-server-security-group"
+  BastionServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound SSH traffic from anywhere to Bastion Server in Public Subnet
+      VpcId: 
+        Fn::ImportValue: !Sub "${EnvironmentName}-vpc-id"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-bastion-server-security-group"
+  Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: MyKeyPair
+      ImageId: ami-0b8b44ec9a8f90422
+
+      SecurityGroupIds:
+        - !Ref BastionServerSecurityGroup
+
+      # Use either any public subnet
+      SubnetId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-1"
+
+      # this helps us identify which EC2 instance is the Bastion Host
+      Tags:
+        - Key: Name
+          Value: "Bastion Host"
   # Add your resources here
   # We include a portion of the LaunchTemplate resource so you can use the UserData.
   WebAppLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties: 
       LaunchTemplateData:
+        ImageId: ami-0b8b44ec9a8f90422
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        InstanceType: t2.micro
+        BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: '10'
+        IamInstanceProfile: 
+          Name: !Ref InstanceProfile
+        KeyName: MyKeyPair
         UserData:
           Fn::Base64: |
             #!/bin/bash
-            apt-get update -y
+            sudo apt-get update -y
+            sudo apt -y upgrade
             sudo apt-get install nginx -y
-            service nginx start
+            sudo service nginx start
+            WEB_DIR="/var/www/html"
+            sudo apt -y install unzip curl
+
+            # Install AWSCLIv2
+            sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            sudo unzip awscliv2.zip
+            sudo ./aws/install
+
+            # Get the index.html object from S3 Bucket
+            sudo aws s3 cp s3://my-udagram-bucket-tnmq/index.html ./
+            # cat <<EOF > index.html
+            # <!DOCTYPE html>
+            # <html lang="en">
+            # <head>
+            #     <meta charset="UTF-8">
+            #     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            #     <title>It works, Udagram, Udacity</title>
+            # </head>
+            # <body>
+            #     <h1>It works, Udagram, Udacity</h1>
+            #     <p>This website is hosted on NginX</p>
+            # </body>
+            # </html>
+            # EOF
+
+            # Remove the default index.html of NginX
+            sudo rm -r $WEB_DIR/index.*
+
+            # Move the custom index.html to /var/www/html folder
+            sudo cp index.html $WEB_DIR
+
+            # Reload NginX server
+            sudo systemctl reload nginx
+  WebServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebAppLaunchTemplate
+        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
+      MaxSize: 4 # Required
+      MinSize: 2 # Required
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-web-server"
+          PropagateAtLaunch: true
+      TargetGroupARNs: 
+        - !Ref TargetGroup
+      VPCZoneIdentifier: 
+        - Fn::ImportValue: !Sub "${EnvironmentName}-private-subnet-1"
+        - Fn::ImportValue: !Sub "${EnvironmentName}-private-subnet-2"
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-target-group"
+      UnhealthyThresholdCount: 5
+      VpcId: 
+        Fn::ImportValue: !Sub "${EnvironmentName}-vpc-id"
+  
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: "internet-facing"
+      SecurityGroups: 
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: 
+        - Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-1"
+        - Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-2"
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-load-balancer"
+      Type: "application"
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions: # Required
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions: # Required
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      Conditions: # Required
+        - Field: path-pattern
+          Values: 
+            - /
+      ListenerArn: !Ref Listener
+      Priority: 1 # Required
+  
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: Private
+      BucketName: my-udagram-bucket-tnmq
+      LifecycleConfiguration: 
+        Rules: 
+          - Status: Enabled
+            NoncurrentVersionExpirationInDays: 10
+      VersioningConfiguration: 
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-s3-bucket
+  WebServerIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+       - PolicyName: "Web-Server-Access-To-S3-Bucket"
+         PolicyDocument:
+           Version: "2012-10-17"
+           Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                Resource: 
+                  !Join ['', [!GetAtt S3Bucket.Arn, '/*']]
+                # ManagedPolicyArns:
+                # - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: '/'
+      Roles:
+      - !Ref WebServerIamRole
+
+Outputs:
+  LoadBalancerURL:
+    Description: The URL of the Load Balancer
+    Value: !Sub "http://${LoadBalancer.DNSName}"
+    Export: 
+      Name: !Sub "${EnvironmentName}-load-balancer-url"
