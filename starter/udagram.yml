@@ -4,6 +4,9 @@ Parameters:
   EnvironmentName:
     Type: String
     Description: The environment name
+  S3BucketName:
+    Type: String
+    Description: The name of the S3 bucket
   AsgDesiredCapacity:
     Type: String
     Description: Desired capacity for the fleet of instances
@@ -160,7 +163,7 @@ Resources:
           Name: !Ref InstanceProfile
         KeyName: MyKeyPair
         UserData:
-          Fn::Base64: |
+          Fn::Base64:  !Sub |
             #!/bin/bash
             sudo apt-get update -y
             sudo apt -y upgrade
@@ -175,7 +178,7 @@ Resources:
             sudo ./aws/install
 
             # Get the index.html object from S3 Bucket
-            sudo aws s3 cp s3://my-udagram-bucket-tnmq/index.html ./
+            sudo aws s3 cp s3://${S3BucketName}/index.html ./
             # cat <<EOF > index.html
             # <!DOCTYPE html>
             # <html lang="en">
@@ -275,7 +278,7 @@ Resources:
     Type: AWS::S3::Bucket
     Properties: 
       AccessControl: Private
-      BucketName: my-udagram-bucket-tnmq
+      BucketName: !Ref S3BucketName
       LifecycleConfiguration: 
         Rules: 
           - Status: Enabled
