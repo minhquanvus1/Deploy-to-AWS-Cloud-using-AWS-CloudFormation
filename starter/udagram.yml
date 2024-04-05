@@ -72,24 +72,76 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${EnvironmentName}-bastion-server-security-group"
-  Bastion:
-    Type: AWS::EC2::Instance
+  BastionServerEIP:
+    Type: AWS::EC2::EIP
     Properties:
-      InstanceType: t2.micro
-      KeyName: MyKeyPair
-      ImageId: ami-0b8b44ec9a8f90422
+      Domain: 
+        Fn::ImportValue: !Sub "${EnvironmentName}-vpc-id"
+  BastionServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: ami-0b8b44ec9a8f90422
+        InstanceType: t2.micro
+        KeyName: MyKeyPair
+        SecurityGroupIds:
+          - !Ref BastionServerSecurityGroup
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+            - |
+              #!/bin/bash
+              sudo apt-get update -y
+              sudo apt -y upgrade
+              sudo apt -y install unzip curl
 
-      SecurityGroupIds:
-        - !Ref BastionServerSecurityGroup
+              # Install AWSCLIv2
+              sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              sudo unzip awscliv2.zip
+              sudo ./aws/install
 
-      # Use either any public subnet
-      SubnetId:
-        Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-1"
+              # Get the Instance ID of this BastionServer EC2 Instance
+              instance_id=$(sudo curl -s http://169.254.169.254/latest/meta-data/instance-id)
 
-      # this helps us identify which EC2 instance is the Bastion Host
-      Tags:
+              # Allocate static Elastic IP to this BastionServer
+              sudo aws ec2 associate-address --instance-id $instance_id --allow-reassociation --region ${AWS::Region} --allocation-id ${EIPAllocationId}
+            - EIPAllocationId: !GetAtt BastionServerEIP.AllocationId
+  BastionServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 1
+      LaunchTemplate:
+        LaunchTemplateId: !Ref BastionServerLaunchTemplate
+        Version: !GetAtt BastionServerLaunchTemplate.LatestVersionNumber
+      MaxSize: 1 # Required
+      MinSize: 1 # Required
+      Tags: 
         - Key: Name
-          Value: "Bastion Host"
+          Value: !Sub "${EnvironmentName}-bastion-server"
+          PropagateAtLaunch: true 
+      VPCZoneIdentifier: 
+        - Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-1"
+        - Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-2"
+  # Bastion:
+  #   Type: AWS::EC2::Instance
+  #   Properties:
+  #     InstanceType: t2.micro
+  #     KeyName: MyKeyPair
+  #     ImageId: ami-0b8b44ec9a8f90422
+
+  #     SecurityGroupIds:
+  #       - !Ref BastionServerSecurityGroup
+
+  #     # Use either any public subnet
+  #     SubnetId:
+  #       Fn::ImportValue: !Sub "${EnvironmentName}-public-subnet-1"
+
+  #     # this helps us identify which EC2 instance is the Bastion Host
+  #     Tags:
+  #       - Key: Name
+  #         Value: "Bastion Host"
   # Add your resources here
   # We include a portion of the LaunchTemplate resource so you can use the UserData.
   WebAppLaunchTemplate:
@@ -262,6 +314,14 @@ Resources:
          PolicyDocument:
            Version: "2012-10-17"
            Statement: 
+              - Effect: "Allow"
+                Action: 
+                - "ec2:DescribeAddresses"
+                - "ec2:AllocateAddress"
+                - "ec2:DescribeInstances"
+                - "ec2:AssociateAddress"
+                Resource: 
+                  - "*"
               - Effect: "Allow"
                 Action: 
                   - "s3:GetObject"
