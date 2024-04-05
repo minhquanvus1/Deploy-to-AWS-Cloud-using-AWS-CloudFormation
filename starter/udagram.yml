@@ -343,3 +343,8 @@ Outputs:
     Value: !Sub "http://${LoadBalancer.DNSName}"
     Export: 
       Name: !Sub "${EnvironmentName}-load-balancer-url"
+  BastionServerPublicIp:
+    Description: The Public IP (Static Elastic IP) of the Bastion Server
+    Value: !GetAtt BastionServerEIP.PublicIp
+    Export: 
+      Name: !Sub "${EnvironmentName}-bastion-server-public-ip"
