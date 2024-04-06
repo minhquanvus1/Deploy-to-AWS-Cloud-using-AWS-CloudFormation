@@ -147,7 +147,7 @@
 
 ## Deployment
 
-- This is the DNS Name for the Application Load Balancer: `http://myudag-loadb-9jlnpxl4b1ir-1039294898.us-east-2.elb.amazonaws.com/`
+- This is the DNS Name for the Application Load Balancer: http://myudag-loadb-9jlnpxl4b1ir-1039294898.us-east-2.elb.amazonaws.com/
 
 ## Author:
 
