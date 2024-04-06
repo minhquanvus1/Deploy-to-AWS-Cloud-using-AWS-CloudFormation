@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "dev"
+    },
+    {
+        "ParameterKey": "S3BucketName",
+        "ParameterValue": "my-udagram-bucket-tnmq"
+    }
+]

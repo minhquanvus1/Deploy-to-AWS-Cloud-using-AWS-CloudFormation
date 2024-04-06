@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create S3 Bucket
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: The environment name
+  S3BucketName:
+    Type: String
+    Description: The name of the S3 bucket
+Resources: 
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: Private
+      BucketName: !Ref S3BucketName
+      LifecycleConfiguration: 
+        Rules: 
+          - Status: Enabled
+            NoncurrentVersionExpirationInDays: 10
+      VersioningConfiguration: 
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-s3-bucket
+ 
+Outputs:
+  S3BucketArn:
+    Description: The ARN of the S3 bucket
+    Value: !GetAtt S3Bucket.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-s3-bucket-arn
+  S3BucketName:
+    Description: The Name of the S3 Bucket
+    Value: !Ref S3Bucket
+    Export: 
+      Name: !Sub ${EnvironmentName}-s3-bucket-name
