@@ -4,7 +4,7 @@
 		"ParameterValue": "dev"
 	},
 	{
-		"ParameterKey": "S3BucketName",
-		"ParameterValue": "my-udagram-bucket-tnmq"
+		"ParameterKey": "KeyPairName",
+		"ParameterValue": "MyKeyPair"
 	}
 ]

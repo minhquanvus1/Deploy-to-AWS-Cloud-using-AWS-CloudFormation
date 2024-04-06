@@ -4,13 +4,13 @@ Parameters:
   EnvironmentName:
     Type: String
     Description: The environment name
-  S3BucketName:
-    Type: String
-    Description: The name of the S3 bucket
   AsgDesiredCapacity:
     Type: String
     Description: Desired capacity for the fleet of instances
     Default: 2
+  KeyPairName:
+    Type: String
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the Bastion Server
 
 Resources:
 
@@ -86,7 +86,7 @@ Resources:
       LaunchTemplateData:
         ImageId: ami-0b8b44ec9a8f90422
         InstanceType: t2.micro
-        KeyName: MyKeyPair
+        KeyName: !Ref KeyPairName
         SecurityGroupIds:
           - !Ref BastionServerSecurityGroup
         IamInstanceProfile:
@@ -131,7 +131,7 @@ Resources:
   #   Type: AWS::EC2::Instance
   #   Properties:
   #     InstanceType: t2.micro
-  #     KeyName: MyKeyPair
+  #     KeyName: !Ref KeyPairName
   #     ImageId: ami-0b8b44ec9a8f90422
 
   #     SecurityGroupIds:
@@ -161,47 +161,52 @@ Resources:
             VolumeSize: '10'
         IamInstanceProfile: 
           Name: !Ref InstanceProfile
-        KeyName: MyKeyPair
+        # KeyName: !Ref KeyPairName
         UserData:
-          Fn::Base64:  !Sub |
-            #!/bin/bash
-            sudo apt-get update -y
-            sudo apt -y upgrade
-            sudo apt-get install nginx -y
-            sudo service nginx start
-            WEB_DIR="/var/www/html"
-            sudo apt -y install unzip curl
+          Fn::Base64: 
+            Fn::Sub:
+            - |
+              #!/bin/bash
+              sudo apt-get update -y
+              sudo apt -y upgrade
+              sudo apt-get install nginx -y
+              sudo service nginx start
+              WEB_DIR="/var/www/html"
+              sudo apt -y install unzip curl
 
-            # Install AWSCLIv2
-            sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            sudo unzip awscliv2.zip
-            sudo ./aws/install
+              # Install AWSCLIv2
+              sudo curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              sudo unzip awscliv2.zip
+              sudo ./aws/install
 
-            # Get the index.html object from S3 Bucket
-            sudo aws s3 cp s3://${S3BucketName}/index.html ./
-            # cat <<EOF > index.html
-            # <!DOCTYPE html>
-            # <html lang="en">
-            # <head>
-            #     <meta charset="UTF-8">
-            #     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            #     <title>It works, Udagram, Udacity</title>
-            # </head>
-            # <body>
-            #     <h1>It works, Udagram, Udacity</h1>
-            #     <p>This website is hosted on NginX</p>
-            # </body>
-            # </html>
-            # EOF
+              # Get the index.html object from S3 Bucket
+              sudo aws s3 cp s3://${S3BucketName}/index.html ./
+              # cat <<EOF > index.html
+              # <!DOCTYPE html>
+              # <html lang="en">
+              # <head>
+              #     <meta charset="UTF-8">
+              #     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              #     <title>It works, Udagram, Udacity</title>
+              # </head>
+              # <body>
+              #     <h1>It works, Udagram, Udacity</h1>
+              #     <p>This website is hosted on NginX</p>
+              # </body>
+              # </html>
+              # EOF
 
-            # Remove the default index.html of NginX
-            sudo rm -r $WEB_DIR/index.*
+              # Remove the default index.html of NginX
+              sudo rm -r $WEB_DIR/index.*
 
-            # Move the custom index.html to /var/www/html folder
-            sudo cp index.html $WEB_DIR
+              # Move the custom index.html to /var/www/html folder
+              sudo cp index.html $WEB_DIR
 
-            # Reload NginX server
-            sudo systemctl reload nginx
+              # Reload NginX server
+              sudo systemctl reload nginx
+            - S3BucketName: 
+                Fn::ImportValue:
+                  !Sub "${EnvironmentName}-s3-bucket-name"
   WebServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -273,30 +278,6 @@ Resources:
             - /
       ListenerArn: !Ref Listener
       Priority: 1 # Required
-  
-  S3Bucket:
-    Type: AWS::S3::Bucket
-    Properties: 
-      AccessControl: Private
-      BucketName: !Ref S3BucketName
-      LifecycleConfiguration: 
-        Rules: 
-          - Status: Enabled
-            NoncurrentVersionExpirationInDays: 10
-      VersioningConfiguration: 
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        IgnorePublicAcls: true
-        BlockPublicPolicy: false
-        RestrictPublicBuckets: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-s3-bucket
   WebServerIamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -330,7 +311,12 @@ Resources:
                   - "s3:GetObject"
                   - "s3:PutObject"
                 Resource: 
-                  !Join ['', [!GetAtt S3Bucket.Arn, '/*']]
+                  !Join
+                    - ''
+                    - - Fn::ImportValue:
+                          !Sub "${EnvironmentName}-s3-bucket-arn"
+                      - '/*'
+                  # !Join ['', [!GetAtt S3Bucket.Arn, '/*']]
                 # ManagedPolicyArns:
                 # - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
   InstanceProfile:
