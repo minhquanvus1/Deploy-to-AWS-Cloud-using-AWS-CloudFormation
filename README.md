@@ -20,9 +20,9 @@
   - `S3/`:
     - `s3-parameters.json`: Contains the parameters for the S3 Stack
     - `s3.yml`: Contains the CloudFormation template for the S3 Stack
-  - `README.md`: The Readmefile for the project
 - `AWS_CloudFormation_Deploy_Web_app.drawio.png`: The diagram of the Infrastructure Components
 - `screenshots/`: Contains the screenshots of the infrastructure, and SSH into the Bastion Server and Web Server
+- `README.md`: The Readmefile for the project
 - `index.html`: The simple HTML file to be served as the Web Server
 - `run.sh`: The script to deploy the CloudFormation Stack
 - `create_key_pair.sh`: The script to create a Key Pair
